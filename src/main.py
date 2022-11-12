@@ -3,13 +3,10 @@
 Python script for Wedding sites from
 spanish site https://www.bodas.net/
 '''
-from multiprocessing.sharedctypes import Value
-from threading import local
 from bs4 import BeautifulSoup
 import argparse
 import logging
 import requests
-import sys
 
 LOG_FORMATTER = '%(asctime)s'\
                 '- %(levelname)s - %(module)s - %(funcName)s - %(message)s'
