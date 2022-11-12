@@ -3,10 +3,14 @@
 Python script for Wedding sites from
 spanish site https://www.bodas.net/
 '''
-from bs4 import BeautifulSoup
+
 import argparse
 import logging
 import requests
+
+from bs4 import BeautifulSoup
+
+TIMEOUT=5
 
 LOG_FORMATTER = '%(asctime)s'\
                 '- %(levelname)s - %(module)s - %(funcName)s - %(message)s'
@@ -17,17 +21,13 @@ logger.setLevel(logging.DEBUG)
 
 URL='https://www.bodas.net/busc.php?id_grupo=1&id_provincia=3035&NumPage='
 
-def parse_wedding_site(url_site: str)->None:
+def parse_wedding_site(urlSite: str)->None:
     '''
     Extract data from wedding sitepage
     '''
 
-    # logger.info('Reading {}'.format(url_site))
-    # with open(url_site, 'r') as f:
-    #     soup = BeautifulSoup(f, "html.parser")
-
-    logger.debug('Checking {}'.format(url_site))
-    page = requests.get(url_site)
+    logger.debug('Checking %s', urlSite)
+    page = requests.get(urlSite, timeout=TIMEOUT)
     soup = BeautifulSoup(page.content, 'html.parser')
 
     # Extract title from wedding site
@@ -38,15 +38,16 @@ def parse_wedding_site(url_site: str)->None:
         price = soup.find_all('span', class_='quickInfo__itemLabel')[0]
         price = int(price.string.replace('€', ''))
     except ValueError:
-        logger.warning("Price doesn't for {}".format(title))
+        logger.warning("Price doesn't for %s", title)
         return
     except IndexError:
-        logger.warning("Info doesn't found for {}".format(title))
+        logger.warning("Info doesn't found for %s", title)
         return
 
     # Extract guests range from wedding site
     guests = []
-    guests_string = soup.find_all('span', class_='quickInfo__itemValue')[0].string
+    guests_string = soup.find_all('span',
+                                  class_='quickInfo__itemValue')[0].string
     if 'Hasta' in guests_string:
         guests = [0, int(guests_string.replace('Hasta', ''))]
     elif 'a' in guests_string:
@@ -55,8 +56,8 @@ def parse_wedding_site(url_site: str)->None:
     # Extract address
     address = soup.find_all('p', class_='storefrontMap__address')[0].string
 
-    logger.info('Site = {} | Price = {} | Guests = {} | Addres = {}'\
-        .format(title, price, guests, address))
+    logger.info('Site = %s | Price = %s | Guests = %s | Addres = %s'\
+        ,title, price, guests, address)
 
 
 
@@ -67,10 +68,10 @@ def extract_data_from_list_page(iters: int)->list:
 
     # Get all sites page by page
     sites = []
-    for iter in range(1, iters):
-        url_site = '{}{}'.format(URL, iter)
-        logger.info('Using URL = {}'.format(url_site))
-        page = requests.get(url_site)
+    for idx in range(1, iters):
+        urlSite = ('%s%s', URL, idx)
+        logger.info('Using URL = %s', urlSite)
+        page = requests.get(urlSite, timeout=TIMEOUT)
         soup = BeautifulSoup(page.content, 'html.parser')
 
         # Detect list of sites in current page list
@@ -79,11 +80,11 @@ def extract_data_from_list_page(iters: int)->list:
         sites.extend(sites_parent)
 
     # Parse data site by site
-    logger.debug('Found {} wedding places'.format(len(sites)))
+    logger.debug('Found %d wedding places', len(sites))
     for idx, site in enumerate(sites):
-        logger.debug('{}/{} wedding website: {}'.format(idx + 1,
-                                                        len(sites),
-                                                        site['href']))
+        logger.debug('%d/%d wedding website: %s', idx + 1,
+                                                  len(sites),
+                                                  site['href'])
         parse_wedding_site(site['href'])
 
 def argument_parser() -> argparse.ArgumentParser:
