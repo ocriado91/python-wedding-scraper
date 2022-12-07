@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 '''
-Python script for Wedding sites from
-spanish site https://www.bodas.net/
+Python script for Wedding places from
+spanish website https://www.bodas.net/
 '''
 
 import argparse
@@ -9,6 +9,25 @@ import logging
 import requests
 
 from bs4 import BeautifulSoup
+from elasticsearch import Elasticsearch
+
+from wedding_site import Place
+
+es = Elasticsearch("http://localhost:9200")
+
+mappings = {
+    "properties" : {
+        "name" : {"type": "keyword"},
+        "price": {"type": "integer"},
+        "guests": {"type": "integer_range"},
+        "coordinates": {"type": "geo_point"},
+        "website": {"type": "keyword"},
+        "review_score": {"type": "float"},
+        "has_more_info": {"type": "boolean"},
+        "multiple_events": {"type": "boolean"},
+        "location_type": {"type": "keyword"}
+    }
+}
 
 TIMEOUT=5
 
@@ -21,71 +40,78 @@ logger.setLevel(logging.DEBUG)
 
 URL='https://www.bodas.net/busc.php?id_grupo=1&id_provincia=3035&NumPage='
 
-def parse_wedding_site(urlSite: str)->None:
+def inject_data(data: dict) -> None:
     '''
-    Extract data from wedding sitepage
+    Inject data into Elasticsearch
     '''
 
-    logger.debug('Checking %s', urlSite)
-    page = requests.get(urlSite, timeout=TIMEOUT)
-    soup = BeautifulSoup(page.content, 'html.parser')
+    logger.info('Injecting data into Elasticsearch...')
 
-    # Extract title from wedding site
-    title = soup.find_all('h1', class_='storefrontHeading__title')[0].string
+    es.indices.delete(index='test')
+    es.indices.create(index='test', mappings=mappings)
 
-    # Try to extract price from wedding site
-    try:
-        price = soup.find_all('span', class_='quickInfo__itemLabel')[0]
-        price = int(price.string.replace('€', ''))
-    except ValueError:
-        logger.warning("Price doesn't for %s", title)
-        return
-    except IndexError:
-        logger.warning("Info doesn't found for %s", title)
-        return
+    idx = 0
+    for place in data.keys():
+        if data[place]['price']:
+            doc = {
+                "name": place,
+                "price": data[place]['price'],
+                "guests": data[place]['guests'],
+                "coordinates": data[place]['location'],
+                "website": data[place]['website'],
+                "review_score": data[place]['review_score'],
+                "has_more_info": data[place]["has_more_info"],
+                "multiple_events": data[place]["multiple_events"],
+                "location_type": data[place]["location_type"]
 
-    # Extract guests range from wedding site
-    guests = []
-    guests_string = soup.find_all('span',
-                                  class_='quickInfo__itemValue')[0].string
-    if 'Hasta' in guests_string:
-        guests = [0, int(guests_string.replace('Hasta', ''))]
-    elif 'a' in guests_string:
-        guests = [int(x) for x in guests_string.split('a')]
+            }
+            idx += 1
+            es.index(index='test', id=idx, document=doc)
+        else:
+            logger.warning('None price detected for %s', place)
 
-    # Extract address
-    address = soup.find_all('p', class_='storefrontMap__address')[0].string
+    es.indices.refresh(index='test')
+    logger.info('Successfully injected data (%d) into Elasticsearch', idx)
 
-    logger.info('Site = %s | Price = %s | Guests = %s | Addres = %s'\
-        ,title, price, guests, address)
+def parse_wedding_site(urlSite: str) -> Place:
+    '''
+    Extract data by each place
+    '''
+
+    return Place(urlSite).build_data()
 
 
-
-def extract_data_from_list_page(iters: int)->list:
+def extract_data_from_list_page(first_page: int, last_page: int)->list:
     '''
     Extract URL of wedding site list page
     '''
 
-    # Get all sites page by page
-    sites = []
-    for idx in range(1, iters):
-        urlSite = ('%s%s', URL, idx)
+    # Get all places page by page
+    places = []
+    for idx in range(first_page, last_page):
+        urlSite = URL + str(idx)
         logger.info('Using URL = %s', urlSite)
         page = requests.get(urlSite, timeout=TIMEOUT)
         soup = BeautifulSoup(page.content, 'html.parser')
 
-        # Detect list of sites in current page list
-        sites_parent = soup.find_all('a',
+        # Detect list of places in current page list
+        places_parent = soup.find_all('a',
                                     class_='vendorTile__title')
-        sites.extend(sites_parent)
+        places.extend(places_parent)
 
-    # Parse data site by site
-    logger.debug('Found %d wedding places', len(sites))
-    for idx, site in enumerate(sites):
+    # Parse data place by place
+    logger.debug('Found %d wedding places', len(places))
+    data = {}
+    for idx, place in enumerate(places):
         logger.debug('%d/%d wedding website: %s', idx + 1,
-                                                  len(sites),
-                                                  site['href'])
-        parse_wedding_site(site['href'])
+                                                  len(places),
+                                                  place['href'])
+        site_data = parse_wedding_site(place['href'])
+        if site_data:
+            data.update(site_data)
+
+    return data
+
 
 def argument_parser() -> argparse.ArgumentParser:
     '''
@@ -93,10 +119,14 @@ def argument_parser() -> argparse.ArgumentParser:
     '''
 
     args = argparse.ArgumentParser()
-    args.add_argument('--iters',
-                      help='Number of iterations (default = 10)',
+    args.add_argument('--first_page',
+                      help='First page to extract data',
                       type=int,
-                      default=10)
+                      default=1)
+    args.add_argument('--last_page',
+                      help='Last page to extract data',
+                      type=int,
+                      default=11)
 
     return args.parse_args()
 
@@ -107,7 +137,9 @@ def main():
 
     logger.info('Starting Wedding Scrapper script')
     args = argument_parser()
-    extract_data_from_list_page(args.iters)
+    data = extract_data_from_list_page(args.first_page, args.last_page)
+    inject_data(data)
+
 
 if __name__ == '__main__':
     main()
