@@ -6,6 +6,7 @@ spanish website https://www.bodas.net/
 
 import argparse
 import logging
+import pandas as pd
 import requests
 
 from bs4 import BeautifulSoup
@@ -39,6 +40,40 @@ logger = logging.getLogger()
 logger.setLevel(logging.DEBUG)
 
 URL='https://www.bodas.net/busc.php?id_grupo=1&id_provincia=3035&NumPage='
+
+def save_data_to_csv(data: dict) -> None:
+    '''
+    Save data into CSV format
+    '''
+
+    acc_data = []
+    print(data)
+    for place in data.keys():
+        if ( data[place]['price'] and
+            data[place]['location']['lat'] and
+            data[place]['location']['lon'] and
+            data[place]['guests']):
+            doc = {
+                "name": place,
+                "price": data[place]['price'],
+                "min_guests": data[place]['guests']['lte'],
+                "max_guests": data[place]['guests']['gte'],
+                "latitude": data[place]['location']['lat'],
+                "longitude": data[place]['location']['lon'],
+                "website": data[place]['website'],
+                "review_score": data[place]['review_score'],
+                "has_more_info": data[place]["has_more_info"],
+                "multiple_events": data[place]["multiple_events"],
+                "location_type": data[place]["location_type"]
+
+            }
+            acc_data.append(doc)
+        else:
+            logger.warning('None enough data detected for %s', place)
+
+    df = pd.DataFrame.from_dict(acc_data)
+    df.to_csv(r'data.csv', index=False, header=True)
+    logger.info('Successfully saved data into CSV format')
 
 def inject_data(data: dict) -> None:
     '''
@@ -127,6 +162,9 @@ def argument_parser() -> argparse.ArgumentParser:
                       help='Last page to extract data',
                       type=int,
                       default=11)
+    args.add_argument('--store_csv',
+                      help='Store data into CSV format',
+                      action='store_true')
 
     return args.parse_args()
 
@@ -138,7 +176,15 @@ def main():
     logger.info('Starting Wedding Scrapper script')
     args = argument_parser()
     data = extract_data_from_list_page(args.first_page, args.last_page)
-    inject_data(data)
+
+    # Check if store_csv flag argument is set
+    # if not, inject data into Elasticsearch
+    if args.store_csv:
+        logger.info('Storing data into CSV format')
+        save_data_to_csv(data)
+    else:
+        logger.info('Storing data into Elasticsearch')
+        inject_data(data)
 
 
 if __name__ == '__main__':
