@@ -47,7 +47,6 @@ def save_data_to_csv(data: dict) -> None:
     '''
 
     acc_data = []
-    print(data)
     for place in data.keys():
         if ( data[place]['price'] and
             data[place]['location']['lat'] and
@@ -75,38 +74,67 @@ def save_data_to_csv(data: dict) -> None:
     df.to_csv(r'data.csv', index=False, header=True)
     logger.info('Successfully saved data into CSV format')
 
-def inject_data(data: dict) -> None:
+def inject_data(data: dict, remove_index: bool) -> None:
     '''
     Inject data into Elasticsearch
     '''
 
+    if remove_index:
+        logger.info('Removing Elasticsearch index...')
+        es.indices.delete(index='test')
+
     logger.info('Injecting data into Elasticsearch...')
 
-    es.indices.delete(index='test')
-    es.indices.create(index='test', mappings=mappings)
+    if not es.indices.exists(index='test'):
+        es.indices.create(index='test', mappings=mappings)
 
-    idx = 0
+    previous_data_count = 0
+    new_data_count = 0
     for place in data.keys():
         if data[place]['price']:
-            doc = {
-                "name": place,
-                "price": data[place]['price'],
-                "guests": data[place]['guests'],
-                "coordinates": data[place]['location'],
-                "website": data[place]['website'],
-                "review_score": data[place]['review_score'],
-                "has_more_info": data[place]["has_more_info"],
-                "multiple_events": data[place]["multiple_events"],
-                "location_type": data[place]["location_type"]
-
-            }
-            idx += 1
-            es.index(index='test', id=idx, document=doc)
+            result = es.count(index='test',
+                              body={'query':{
+                                        'match': {
+                                            'name': place
+                                        }
+                                    }
+                                }
+                            )
+            logger.debug('Found %d matches of %s',
+                    result['count'],
+                    place)
+            if result['count'] > 0:
+                previous_data_count += 1
+                logger.info('%s already injected', place)
+            else:
+                doc = {
+                    "name": place,
+                    "price": data[place]['price'],
+                    "guests": data[place]['guests'],
+                    "coordinates": data[place]['location'],
+                    "website": data[place]['website'],
+                    "review_score": data[place]['review_score'],
+                    "has_more_info": data[place]["has_more_info"],
+                    "multiple_events": data[place]["multiple_events"],
+                    "location_type": data[place]["location_type"]
+                }
+                new_data_count += 1
+                es.index(index='test', document=doc)
+                logger.debug('Successfully injected %s', place)
         else:
             logger.warning('None price detected for %s', place)
 
     es.indices.refresh(index='test')
-    logger.info('Successfully injected data (%d) into Elasticsearch', idx)
+    total_result = es.count(index='test')
+    total_points = total_result['count']
+    logger.debug('Trying to inject %d data points',
+        new_data_count + previous_data_count)
+    logger.debug('Rejected %d data points due to already injected',
+        previous_data_count)
+    logger.info('Successfully injected data (%d) into Elasticsearch.',
+            new_data_count)
+    logger.info('Inject total data points = %d',
+        total_points)
 
 def parse_wedding_site(urlSite: str) -> Place:
     '''
@@ -165,7 +193,10 @@ def argument_parser() -> argparse.ArgumentParser:
     args.add_argument('--store_csv',
                       help='Store data into CSV format',
                       action='store_true')
-
+    args.add_argument('--remove_index',
+                     help='Remove ElasticSearch index',
+                     default=False,
+                     action='store_true')
     return args.parse_args()
 
 def main():
@@ -184,7 +215,7 @@ def main():
         save_data_to_csv(data)
     else:
         logger.info('Storing data into Elasticsearch')
-        inject_data(data)
+        inject_data(data, args.remove_index)
 
 
 if __name__ == '__main__':
