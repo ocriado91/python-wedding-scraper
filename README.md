@@ -2,6 +2,8 @@
 A Python script that scrapes wedding location information from a website and
 stores it in Elasticsearch or in CSV format.
 
+![image](https://user-images.githubusercontent.com/55914877/208426492-7e36ee12-3234-463d-a8c9-1f6499a984f1.png)
+
 # Prerequisites
 Python 3
 
